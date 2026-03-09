@@ -51,7 +51,7 @@ def _get_list(key: str, default: List[str]) -> List[str]:
 # 智谱 AI GLM 大语言模型
 # ========================================================
 
-GLM_API_KEY: str = _get_env("GLM_API_KEY", required=True)
+GLM_API_KEY: str = _get_env("GLM_API_KEY", "test-key-for-ci")
 GLM_MODEL_NAME: str = _get_env("GLM_MODEL_NAME", "glm-5")
 GLM_API_BASE: str = _get_env("GLM_API_BASE", "https://open.bigmodel.cn/api/paas/v4")
 GLM_TEMPERATURE: float = _get_float("GLM_TEMPERATURE", 0.1)
@@ -74,7 +74,7 @@ MILVUS_URI: str = f"http://{MILVUS_HOST}:{MILVUS_PORT}"
 # Embedding 向量化模型
 # ========================================================
 
-EMBEDDING_MODEL_NAME: str = _get_env("EMBEDDING_MODEL_NAME", "/Users/Zhuanz1/Documents/AI_Study/MindOS/personal_MindOS/my_rag_kb/models/bge-small-zh-v1.5")
+EMBEDDING_MODEL_NAME: str = _get_env("EMBEDDING_MODEL_NAME", "models/bge-small-zh-v1.5")
 EMBEDDING_DEVICE: str = _get_env("EMBEDDING_DEVICE", "mps")
 EMBEDDING_DIMENSION: int = _get_int("EMBEDDING_DIMENSION", 512)
 
@@ -83,7 +83,7 @@ EMBEDDING_DIMENSION: int = _get_int("EMBEDDING_DIMENSION", 512)
 # Reranker 重排序模型
 # ========================================================
 
-RERANKER_MODEL_NAME: str = _get_env("RERANKER_MODEL_NAME", "/Users/Zhuanz1/Documents/AI_Study/MindOS/personal_MindOS/my_rag_kb/models/bge-reranker-base")
+RERANKER_MODEL_NAME: str = _get_env("RERANKER_MODEL_NAME", "models/bge-reranker-base")
 RERANKER_TOP_K: int = _get_int("RERANKER_TOP_K", 3)
 
 
