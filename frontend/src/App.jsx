@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ChatWindow from "./ChatWindow";
+import Sidebar from "./Sidebar";
 
 async function request(url, options = {}) {
   const res = await fetch(url, options);
@@ -17,127 +19,6 @@ async function request(url, options = {}) {
 
 function nowPrefix(text) {
   return `[${new Date().toLocaleTimeString()}] ${text}`;
-}
-
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function renderInlineMarkdown(text) {
-  return text
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/_([^_]+)_/g, "<em>$1</em>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>");
-}
-
-function markdownToHtml(markdown) {
-  const source = String(markdown || "").replace(/\r\n/g, "\n");
-
-  const codeBlocks = [];
-  let text = source.replace(/```([\s\S]*?)```/g, (_m, code) => {
-    const idx = codeBlocks.length;
-    codeBlocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
-    return `@@CODE_BLOCK_${idx}@@`;
-  });
-
-  const lines = text.split("\n");
-  const html = [];
-  let inUl = false;
-  let inOl = false;
-
-  const closeLists = () => {
-    if (inUl) {
-      html.push("</ul>");
-      inUl = false;
-    }
-    if (inOl) {
-      html.push("</ol>");
-      inOl = false;
-    }
-  };
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-
-    if (!line) {
-      closeLists();
-      continue;
-    }
-
-    if (/^@@CODE_BLOCK_\d+@@$/.test(line)) {
-      closeLists();
-      html.push(line);
-      continue;
-    }
-
-    const escaped = escapeHtml(line);
-    const heading = escaped.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      closeLists();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
-      continue;
-    }
-
-    const ul = escaped.match(/^[-*]\s+(.+)$/);
-    if (ul) {
-      if (inOl) {
-        html.push("</ol>");
-        inOl = false;
-      }
-      if (!inUl) {
-        html.push("<ul>");
-        inUl = true;
-      }
-      html.push(`<li>${renderInlineMarkdown(ul[1])}</li>`);
-      continue;
-    }
-
-    const ol = escaped.match(/^\d+\.\s+(.+)$/);
-    if (ol) {
-      if (inUl) {
-        html.push("</ul>");
-        inUl = false;
-      }
-      if (!inOl) {
-        html.push("<ol>");
-        inOl = true;
-      }
-      html.push(`<li>${renderInlineMarkdown(ol[1])}</li>`);
-      continue;
-    }
-
-    closeLists();
-    html.push(`<p>${renderInlineMarkdown(escaped)}</p>`);
-  }
-
-  closeLists();
-
-  text = html.join("\n");
-  codeBlocks.forEach((block, idx) => {
-    text = text.replace(`@@CODE_BLOCK_${idx}@@`, block);
-  });
-
-  return text;
-}
-
-function getSourceLocation(src) {
-  const idx = Number(src.chunk_index || 0) + 1;
-  if (src.page_num) {
-    return `页码 ${src.page_num} | 片段 ${idx}`;
-  }
-  if (src.chapter_title) {
-    return `章节 ${src.chapter_title} | 片段 ${idx}`;
-  }
-  return `片段 ${idx}`;
 }
 
 const SESSION_STORAGE_KEY = "rag_chat_session_id";
@@ -502,328 +383,90 @@ export default function App() {
     saveSessionId(sessionId);
   }, [sessionId]);
 
+  async function onClearHistory() {
+    const currentSessionId = (sessionId || "").trim();
+    if (currentSessionId) {
+      try {
+        await request(`/api/chat/history?session_id=${encodeURIComponent(currentSessionId)}`, {
+          method: "DELETE",
+        });
+      } catch (_err) {
+        // ignore
+      }
+    }
+    setMessages([]);
+    setSessionId("");
+  }
+
   return (
     <div className="layout">
-      <aside className="sidebar">
-        <h2>📁 知识库管理</h2>
-
-        <section className="card">
-          <h3>📚 书籍上传</h3>
-          <p className="hint">支持格式：{(config?.supported_extensions || []).join(", ")}</p>
-          <input
-            type="file"
-            multiple
-            onChange={async (event) => {
-              const selectedFiles = Array.from(event.target.files || []);
-              setFiles(selectedFiles);
-              setMetadataMap({});
-              setBuildLogs([]);
-              if (!selectedFiles.length) {
-                return;
-              }
-              await parseMetadataForFiles(selectedFiles);
-            }}
-          />
-          <label className="checkbox-line">
-            <input
-              type="checkbox"
-              checked={forceRebuild}
-              onChange={(event) => setForceRebuild(event.target.checked)}
-            />
-            强制重建同名文档（先删后建）
-          </label>
-
-          <div className="meta-forms">
-            {files.map((file) => {
-              const meta = metadataMap[file.name] || {};
-              const domains = config?.valid_domains || [];
-              const selectedDomain = meta.domain || domains[0] || "";
-              return (
-                <div className="meta-item" key={file.name}>
-                  <h4>元数据编辑：{file.name}</h4>
-                  <div className="meta-grid">
-                    <input
-                      value={meta.book_id || ""}
-                      placeholder="book_id"
-                      onChange={(e) => updateMetaField(file.name, "book_id", e.target.value)}
-                    />
-                    <input
-                      value={meta.title || file.name}
-                      placeholder="书名(title)"
-                      onChange={(e) => updateMetaField(file.name, "title", e.target.value)}
-                    />
-                    <input
-                      value={meta.author || "未知作者"}
-                      placeholder="作者(author)"
-                      onChange={(e) => updateMetaField(file.name, "author", e.target.value)}
-                    />
-                    <select
-                      value={selectedDomain}
-                      onChange={(e) => updateMetaField(file.name, "domain", e.target.value)}
-                    >
-                      {domains.map((domain) => (
-                        <option key={domain} value={domain}>
-                          {domain}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      value={meta.reading_date || ""}
-                      placeholder="阅读日期(reading_date)"
-                      onChange={(e) => updateMetaField(file.name, "reading_date", e.target.value)}
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      value={Number(meta.total_pages || 0)}
-                      placeholder="总页数(total_pages)"
-                      onChange={(e) => updateMetaField(file.name, "total_pages", e.target.value)}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <button className="primary" disabled={buildSubmitting} onClick={onBuild}>
-            📥 构建知识库
-          </button>
-          <pre ref={buildLogRef} className="log">
-            {buildLogs.join("\n")}
-          </pre>
-        </section>
-
-        <section className="card">
-          <h3>📝 笔记上传</h3>
-          <select value={noteBookId} onChange={(e) => setNoteBookId(e.target.value)}>
-            {!books.length ? (
-              <option value="">请先上传并构建书籍</option>
-            ) : (
-              books.map((book, index) => (
-                <option key={`${book.book_id || ""}_${book.file_name || ""}_${index}`} value={book.book_id || ""}>
-                  {`${book.title || book.file_name} (${book.book_id || ""})`}
-                </option>
-              ))
-            )}
-          </select>
-          <input
-            placeholder="笔记标题(可选)"
-            value={noteTitle}
-            onChange={(e) => setNoteTitle(e.target.value)}
-          />
-          <textarea
-            rows="5"
-            placeholder="请输入与书籍对应的个人阅读笔记..."
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-          />
-          <button className="primary" disabled={noteSubmitting} onClick={onUploadNote}>
-            📌 上传笔记并入库
-          </button>
-          <pre ref={noteLogRef} className="log">
-            {noteLogs.join("\n")}
-          </pre>
-        </section>
-
-        <section className="card">
-          <h3>📊 知识库状态</h3>
-          <div className="manifest-list">
-            {!manifestItems.length ? (
-              <div className="manifest-item">知识库为空，请先上传文档。</div>
-            ) : (
-              manifestItems.map((item) => (
-                <div className="manifest-item" key={item.file_path}>
-                  <div className="title">{item.title || item.file_name}</div>
-                  <div>
-                    {`book_id=${item.book_id || ""} | author=${item.author || "未知作者"} | domain=${item.domain || ""}`}
-                  </div>
-                  <div>{`文件=${item.file_name} | ${item.chunk_count} 切片 | ${item.processed_at || ""}`}</div>
-                  <button onClick={() => onDeleteFile(item)}>🗑️ 删除</button>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="card">
-          <h3>🗂️ 笔记状态</h3>
-          <div className="manifest-list">
-            {!noteItems.length ? (
-              <div className="manifest-item">暂无个人笔记。</div>
-            ) : (
-              noteItems.map((item) => (
-                <div className="manifest-item" key={item.note_id}>
-                  <div className="title">{item.note_title || item.note_id}</div>
-                  <div>{`book_id=${item.book_id || ""} | title=${item.title || ""}`}</div>
-                  <div>{`${item.chunk_count || 0} 切片 | ${item.processed_at || ""}`}</div>
-                  <button onClick={() => onDeleteNote(item)}>🗑️ 删除笔记</button>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="card">
-          <h3>🎯 元数据过滤</h3>
-          <input placeholder="book_id" value={filterBookId} onChange={(e) => setFilterBookId(e.target.value)} />
-          <input placeholder="书名(title)" value={filterTitle} onChange={(e) => setFilterTitle(e.target.value)} />
-          <input placeholder="作者(author)" value={filterAuthor} onChange={(e) => setFilterAuthor(e.target.value)} />
-          <select value={filterDomain} onChange={(e) => setFilterDomain(e.target.value)}>
-            <option value="">全部领域</option>
-            {(config?.valid_domains || []).map((domain) => (
-              <option key={domain} value={domain}>
-                {domain}
-              </option>
-            ))}
-          </select>
-
-          <label className="checkbox-line">
-            <input
-              type="checkbox"
-              checked={enablePageRange}
-              onChange={(e) => setEnablePageRange(e.target.checked)}
-            />
-            启用页码范围过滤
-          </label>
-          <div className="range-row">
-            <input
-              type="number"
-              min="1"
-              value={minPage}
-              disabled={!enablePageRange}
-              onChange={(e) => setMinPage(Number(e.target.value))}
-            />
-            <span>到</span>
-            <input
-              type="number"
-              min="1"
-              value={maxPage}
-              disabled={!enablePageRange}
-              onChange={(e) => setMaxPage(Number(e.target.value))}
-            />
-          </div>
-        </section>
-
-        <section className="card">
-          <h3>⚙️ 检索参数</h3>
-          <label className="checkbox-line">
-            <input
-              type="checkbox"
-              checked={useReranker}
-              onChange={(e) => setUseReranker(e.target.checked)}
-            />
-            启用重排序 (Reranker)
-          </label>
-          <label>
-            向量召回数量 <span>{recallTopK}</span>
-          </label>
-          <input
-            type="range"
-            min="3"
-            max="30"
-            value={recallTopK}
-            onChange={(e) => setRecallTopK(Number(e.target.value))}
-          />
-          <label>
-            最终返回文档数 <span>{rerankTopK}</span>
-          </label>
-          <input
-            type="range"
-            min="1"
-            max="10"
-            value={rerankTopK}
-            onChange={(e) => setRerankTopK(Number(e.target.value))}
-          />
-        </section>
-
-        <button
-          className="danger"
-          onClick={async () => {
-            const currentSessionId = (sessionId || "").trim();
-            if (currentSessionId) {
-              try {
-                await request(`/api/chat/history?session_id=${encodeURIComponent(currentSessionId)}`, {
-                  method: "DELETE",
-                });
-              } catch (_err) {
-                // ignore
-              }
-            }
-            setMessages([]);
-            setSessionId("");
-          }}
-        >
-          🗑️ 清除对话历史
-        </button>
-      </aside>
+      <Sidebar
+        config={config}
+        files={files}
+        metadataMap={metadataMap}
+        forceRebuild={forceRebuild}
+        buildSubmitting={buildSubmitting}
+        noteSubmitting={noteSubmitting}
+        buildLogs={buildLogs}
+        noteLogs={noteLogs}
+        noteBookId={noteBookId}
+        noteTitle={noteTitle}
+        noteText={noteText}
+        filterBookId={filterBookId}
+        filterTitle={filterTitle}
+        filterAuthor={filterAuthor}
+        filterDomain={filterDomain}
+        enablePageRange={enablePageRange}
+        minPage={minPage}
+        maxPage={maxPage}
+        useReranker={useReranker}
+        recallTopK={recallTopK}
+        rerankTopK={rerankTopK}
+        manifestItems={manifestItems}
+        noteItems={noteItems}
+        books={books}
+        buildLogRef={buildLogRef}
+        noteLogRef={noteLogRef}
+        setFiles={setFiles}
+        setMetadataMap={setMetadataMap}
+        setBuildLogs={setBuildLogs}
+        parseMetadataForFiles={parseMetadataForFiles}
+        setForceRebuild={setForceRebuild}
+        updateMetaField={updateMetaField}
+        onBuild={onBuild}
+        setNoteBookId={setNoteBookId}
+        setNoteTitle={setNoteTitle}
+        setNoteText={setNoteText}
+        onUploadNote={onUploadNote}
+        onDeleteFile={onDeleteFile}
+        onDeleteNote={onDeleteNote}
+        setFilterBookId={setFilterBookId}
+        setFilterTitle={setFilterTitle}
+        setFilterAuthor={setFilterAuthor}
+        setFilterDomain={setFilterDomain}
+        setEnablePageRange={setEnablePageRange}
+        setMinPage={setMinPage}
+        setMaxPage={setMaxPage}
+        setUseReranker={setUseReranker}
+        setRecallTopK={setRecallTopK}
+        setRerankTopK={setRerankTopK}
+        onClearHistory={onClearHistory}
+      />
 
       <main className="main">
         <header className="header">
           <h1>📚 中文 RAG 知识库问答系统</h1>
           <p>基于 LangChain + Milvus + GLM | 支持 PDF / Markdown / TXT / EPUB / MOBI</p>
         </header>
-
-        <section ref={chatBoxRef} className="chat-box">
-          {messages.map((msg, idx) => (
-            <div key={`${msg.role}_${idx}`} className={`msg ${msg.role}`}>
-              {msg.role === "assistant" ? (
-                <>
-                  <div className="msg-toolbar">
-                    <button
-                      type="button"
-                      className="copy-btn"
-                      onClick={() => copyMarkdownRaw(msg.content, `${msg.role}_${idx}`)}
-                    >
-                      {copiedMsgKey === `${msg.role}_${idx}` ? "已复制 Markdown" : "复制回答 Markdown 原文"}
-                    </button>
-                  </div>
-                  <div className="markdown-body">
-                    <div
-                      dangerouslySetInnerHTML={{
-                        __html: markdownToHtml(msg.content),
-                      }}
-                    />
-                  </div>
-                </>
-              ) : (
-                <div className="plain-content">{msg.content}</div>
-              )}
-              {msg.role === "assistant" && (msg.sources || []).length > 0 && (
-                <div className="sources">
-                  <strong>📖 参考来源</strong>
-                  {(msg.sources || []).map((src, sidx) => (
-                    <div className="source-item" key={`${idx}_${sidx}`}>
-                      <div>
-                        <strong>{src.title || src.file_name || "未知书籍"}</strong>
-                      </div>
-                      <div>
-                        {`book_id=${src.book_id || ""} | author=${src.author || "未知作者"} | domain=${src.domain || ""}`}
-                      </div>
-                      <div>
-                        {`来源类型=${src.source_type || "book_content"}${src.note_id ? ` | note_id=${src.note_id}` : ""}${src.note_title ? ` | 笔记标题=${src.note_title}` : ""}`}
-                      </div>
-                      <div>{getSourceLocation(src)}</div>
-                      <div>{`文件: ${src.file_name || "未知文件"}`}</div>
-                      <div>{src.preview || ""}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </section>
-
-        <form className="chat-form" onSubmit={onAsk}>
-          <input
-            placeholder="请输入您的问题..."
-            autoComplete="off"
-            value={questionInput}
-            onChange={(e) => setQuestionInput(e.target.value)}
-          />
-          <button type="submit" className="primary">
-            发送
-          </button>
-        </form>
+        <ChatWindow
+          chatBoxRef={chatBoxRef}
+          messages={messages}
+          copiedMsgKey={copiedMsgKey}
+          copyMarkdownRaw={copyMarkdownRaw}
+          questionInput={questionInput}
+          setQuestionInput={setQuestionInput}
+          onAsk={onAsk}
+        />
       </main>
     </div>
   );
