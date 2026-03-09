@@ -590,7 +590,8 @@ def delete_note(note_id: str) -> bool:
         col_name = vectorstore.collection_name
         if utility.has_collection(col_name):
             col = Collection(col_name)
-            expr = f'note_id == "{target_note_id.replace("\\", "\\\\").replace("\"", "\\\"")}"'
+            escaped_note_id = target_note_id.replace("\\", "\\\\").replace('"', '\\"')
+            expr = f'note_id == "{escaped_note_id}"'
             col.delete(expr)
             logger.info("已从 Milvus 删除笔记向量: note_id=%s", target_note_id)
         else:
