@@ -294,6 +294,7 @@ def chat(req: AskRequest) -> Dict[str, Any]:
             "source_type": meta.get("source_type", "book_content"),
             "note_id": meta.get("note_id", ""),
             "note_title": meta.get("note_title", ""),
+            "content": doc.page_content,
             "preview": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
             "chunk_index": meta.get("chunk_index", 0),
             "page_num": meta.get("page_num"),

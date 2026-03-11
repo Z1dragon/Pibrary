@@ -1,3 +1,5 @@
+import { useRef, useState } from "react";
+
 export default function Sidebar({
   config,
   files,
@@ -50,101 +52,206 @@ export default function Sidebar({
   setRerankTopK,
   onClearHistory,
 }) {
-  return (
-    <aside className="sidebar">
-      <h2>📁 知识库管理</h2>
+  const fileInputRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [activeCategory, setActiveCategory] = useState("all");
 
-      <section className="card">
-        <h3>📚 书籍上传</h3>
-        <p className="hint">支持格式：{(config?.supported_extensions || []).join(", ")}</p>
-        <input
-          type="file"
-          multiple
-          onChange={async (event) => {
-            const selectedFiles = Array.from(event.target.files || []);
-            setFiles(selectedFiles);
-            setMetadataMap({});
-            setBuildLogs([]);
-            if (!selectedFiles.length) {
-              return;
-            }
-            await parseMetadataForFiles(selectedFiles);
+  async function handleSelectedFiles(selectedFiles) {
+    setFiles(selectedFiles);
+    setMetadataMap({});
+    setBuildLogs([]);
+    if (!selectedFiles.length) {
+      return;
+    }
+    await parseMetadataForFiles(selectedFiles);
+  }
+
+  async function onFileInputChange(event) {
+    const selectedFiles = Array.from(event.target.files || []);
+    await handleSelectedFiles(selectedFiles);
+  }
+
+  async function onDropFiles(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+    const selectedFiles = Array.from(event.dataTransfer.files || []);
+    await handleSelectedFiles(selectedFiles);
+  }
+
+  const fileCategoryItems = [
+    ...manifestItems.map((item) => ({
+      key: `book_${item.file_path}`,
+      category: "book",
+      title: item.title || item.file_name,
+      subtitle: `${item.author || "未知作者"} · ${item.domain || ""}`,
+      extra: `${item.chunk_count} 切片`,
+      action: () => onDeleteFile(item),
+      actionLabel: "删除",
+    })),
+    ...noteItems.map((item) => ({
+      key: `note_${item.note_id}`,
+      category: "note",
+      title: item.note_title || item.note_id,
+      subtitle: `${item.title || "未关联书名"} · ${item.book_id || ""}`,
+      extra: `${item.chunk_count || 0} 切片`,
+      action: () => onDeleteNote(item),
+      actionLabel: "删除",
+    })),
+  ];
+
+  const visibleCategoryItems = fileCategoryItems.filter((item) => {
+    if (activeCategory === "all") return true;
+    if (activeCategory === "book") return item.category === "book";
+    return item.category === "note";
+  });
+
+  return (
+    <div className="left-panel-body">
+      <section className="ui-card">
+        <div className="panel-title-row">
+          <h2>知识库文件</h2>
+          <span className="muted-text">{fileCategoryItems.length}</span>
+        </div>
+        <p className="muted-text">支持格式：{(config?.supported_extensions || []).join(", ")}</p>
+
+        <div
+          className={`dropzone ${isDragging ? "is-dragging" : ""}`}
+          onClick={() => fileInputRef.current?.click()}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsDragging(true);
           }}
-        />
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsDragging(false);
+          }}
+          onDrop={onDropFiles}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              fileInputRef.current?.click();
+            }
+          }}
+        >
+          <div className="dropzone-icon" aria-hidden="true" />
+          <p>拖拽文件到此处，或点击上传</p>
+        </div>
+        <input ref={fileInputRef} type="file" multiple className="hidden-input" onChange={onFileInputChange} />
+
         <label className="checkbox-line">
           <input
             type="checkbox"
             checked={forceRebuild}
             onChange={(event) => setForceRebuild(event.target.checked)}
           />
-          强制重建同名文档（先删后建）
+          强制重建同名文档
         </label>
-
-        <div className="meta-forms">
-          {files.map((file) => {
-            const meta = metadataMap[file.name] || {};
-            const domains = config?.valid_domains || [];
-            const selectedDomain = meta.domain || domains[0] || "";
-            return (
-              <div className="meta-item" key={file.name}>
-                <h4>元数据编辑：{file.name}</h4>
-                <div className="meta-grid">
-                  <input
-                    value={meta.book_id || ""}
-                    placeholder="book_id"
-                    onChange={(e) => updateMetaField(file.name, "book_id", e.target.value)}
-                  />
-                  <input
-                    value={meta.title || file.name}
-                    placeholder="书名(title)"
-                    onChange={(e) => updateMetaField(file.name, "title", e.target.value)}
-                  />
-                  <input
-                    value={meta.author || "未知作者"}
-                    placeholder="作者(author)"
-                    onChange={(e) => updateMetaField(file.name, "author", e.target.value)}
-                  />
-                  <select
-                    value={selectedDomain}
-                    onChange={(e) => updateMetaField(file.name, "domain", e.target.value)}
-                  >
-                    {domains.map((domain) => (
-                      <option key={domain} value={domain}>
-                        {domain}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={meta.reading_date || ""}
-                    placeholder="阅读日期(reading_date)"
-                    onChange={(e) => updateMetaField(file.name, "reading_date", e.target.value)}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    value={Number(meta.total_pages || 0)}
-                    placeholder="总页数(total_pages)"
-                    onChange={(e) => updateMetaField(file.name, "total_pages", e.target.value)}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <button className="primary" disabled={buildSubmitting} onClick={onBuild}>
-          📥 构建知识库
+        <button className="btn-dark" disabled={buildSubmitting} onClick={onBuild}>
+          构建知识库
         </button>
-        <pre ref={buildLogRef} className="log">
-          {buildLogs.join("\n")}
-        </pre>
       </section>
 
-      <section className="card">
-        <h3>📝 笔记上传</h3>
+      {!!files.length && (
+        <section className="ui-card">
+          <h3>元数据编辑</h3>
+          <div className="meta-forms">
+            {files.map((file) => {
+              const meta = metadataMap[file.name] || {};
+              const domains = config?.valid_domains || [];
+              const selectedDomain = meta.domain || domains[0] || "";
+              return (
+                <div className="meta-item" key={file.name}>
+                  <h4>{file.name}</h4>
+                  <div className="meta-grid">
+                    <input
+                      value={meta.book_id || ""}
+                      placeholder="book_id"
+                      onChange={(e) => updateMetaField(file.name, "book_id", e.target.value)}
+                    />
+                    <input
+                      value={meta.title || file.name}
+                      placeholder="标题"
+                      onChange={(e) => updateMetaField(file.name, "title", e.target.value)}
+                    />
+                    <input
+                      value={meta.author || "未知作者"}
+                      placeholder="作者"
+                      onChange={(e) => updateMetaField(file.name, "author", e.target.value)}
+                    />
+                    <select
+                      value={selectedDomain}
+                      onChange={(e) => updateMetaField(file.name, "domain", e.target.value)}
+                    >
+                      {domains.map((domain) => (
+                        <option key={domain} value={domain}>
+                          {domain}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <section className="ui-card">
+        <div className="category-tabs">
+          <button
+            type="button"
+            className={activeCategory === "all" ? "tab-btn active" : "tab-btn"}
+            onClick={() => setActiveCategory("all")}
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            className={activeCategory === "book" ? "tab-btn active" : "tab-btn"}
+            onClick={() => setActiveCategory("book")}
+          >
+            文档
+          </button>
+          <button
+            type="button"
+            className={activeCategory === "note" ? "tab-btn active" : "tab-btn"}
+            onClick={() => setActiveCategory("note")}
+          >
+            笔记
+          </button>
+        </div>
+
+        <div className="manifest-list">
+          {!visibleCategoryItems.length ? (
+            <div className="manifest-item">暂无可展示文件</div>
+          ) : (
+            visibleCategoryItems.map((item) => (
+              <div className="manifest-item" key={item.key}>
+                <div className="title">{item.title}</div>
+                <div>{item.subtitle}</div>
+                <div>{item.extra}</div>
+                <button type="button" className="btn-ghost" onClick={item.action}>
+                  {item.actionLabel}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      <section className="ui-card">
+        <h3>笔记上传</h3>
         <select value={noteBookId} onChange={(e) => setNoteBookId(e.target.value)}>
           {!books.length ? (
-            <option value="">请先上传并构建书籍</option>
+            <option value="">请先构建书籍文档</option>
           ) : (
             books.map((book, index) => (
               <option key={`${book.book_id || ""}_${book.file_name || ""}_${index}`} value={book.book_id || ""}>
@@ -153,139 +260,103 @@ export default function Sidebar({
             ))
           )}
         </select>
-        <input
-          placeholder="笔记标题(可选)"
-          value={noteTitle}
-          onChange={(e) => setNoteTitle(e.target.value)}
-        />
+        <input placeholder="笔记标题" value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} />
         <textarea
-          rows="5"
-          placeholder="请输入与书籍对应的个人阅读笔记..."
+          rows="4"
+          placeholder="输入与书籍关联的笔记内容"
           value={noteText}
           onChange={(e) => setNoteText(e.target.value)}
         />
-        <button className="primary" disabled={noteSubmitting} onClick={onUploadNote}>
-          📌 上传笔记并入库
+        <button className="btn-dark" disabled={noteSubmitting} onClick={onUploadNote}>
+          上传笔记
         </button>
+      </section>
+
+      <details className="ui-card compact-card">
+        <summary>检索参数与过滤</summary>
+        <div className="form-stack">
+          <input placeholder="book_id" value={filterBookId} onChange={(e) => setFilterBookId(e.target.value)} />
+          <input placeholder="标题" value={filterTitle} onChange={(e) => setFilterTitle(e.target.value)} />
+          <input placeholder="作者" value={filterAuthor} onChange={(e) => setFilterAuthor(e.target.value)} />
+          <select value={filterDomain} onChange={(e) => setFilterDomain(e.target.value)}>
+            <option value="">全部领域</option>
+            {(config?.valid_domains || []).map((domain) => (
+              <option key={domain} value={domain}>
+                {domain}
+              </option>
+            ))}
+          </select>
+
+          <label className="checkbox-line">
+            <input
+              type="checkbox"
+              checked={enablePageRange}
+              onChange={(e) => setEnablePageRange(e.target.checked)}
+            />
+            启用页码范围过滤
+          </label>
+          <div className="range-row">
+            <input
+              type="number"
+              min="1"
+              value={minPage}
+              disabled={!enablePageRange}
+              onChange={(e) => setMinPage(Number(e.target.value))}
+            />
+            <span>到</span>
+            <input
+              type="number"
+              min="1"
+              value={maxPage}
+              disabled={!enablePageRange}
+              onChange={(e) => setMaxPage(Number(e.target.value))}
+            />
+          </div>
+
+          <label className="checkbox-line">
+            <input
+              type="checkbox"
+              checked={useReranker}
+              onChange={(e) => setUseReranker(e.target.checked)}
+            />
+            启用重排序
+          </label>
+
+          <label>
+            向量召回数量 <span>{recallTopK}</span>
+          </label>
+          <input
+            type="range"
+            min="3"
+            max="30"
+            value={recallTopK}
+            onChange={(e) => setRecallTopK(Number(e.target.value))}
+          />
+          <label>
+            最终返回文档数 <span>{rerankTopK}</span>
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="10"
+            value={rerankTopK}
+            onChange={(e) => setRerankTopK(Number(e.target.value))}
+          />
+          <button type="button" className="btn-ghost" onClick={onClearHistory}>
+            清除会话历史
+          </button>
+        </div>
+      </details>
+
+      <details className="ui-card compact-card">
+        <summary>系统日志</summary>
+        <pre ref={buildLogRef} className="log">
+          {buildLogs.join("\n")}
+        </pre>
         <pre ref={noteLogRef} className="log">
           {noteLogs.join("\n")}
         </pre>
-      </section>
-
-      <section className="card">
-        <h3>📊 知识库状态</h3>
-        <div className="manifest-list">
-          {!manifestItems.length ? (
-            <div className="manifest-item">知识库为空，请先上传文档。</div>
-          ) : (
-            manifestItems.map((item) => (
-              <div className="manifest-item" key={item.file_path}>
-                <div className="title">{item.title || item.file_name}</div>
-                <div>
-                  {`book_id=${item.book_id || ""} | author=${item.author || "未知作者"} | domain=${item.domain || ""}`}
-                </div>
-                <div>{`文件=${item.file_name} | ${item.chunk_count} 切片 | ${item.processed_at || ""}`}</div>
-                <button onClick={() => onDeleteFile(item)}>🗑️ 删除</button>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="card">
-        <h3>🗂️ 笔记状态</h3>
-        <div className="manifest-list">
-          {!noteItems.length ? (
-            <div className="manifest-item">暂无个人笔记。</div>
-          ) : (
-            noteItems.map((item) => (
-              <div className="manifest-item" key={item.note_id}>
-                <div className="title">{item.note_title || item.note_id}</div>
-                <div>{`book_id=${item.book_id || ""} | title=${item.title || ""}`}</div>
-                <div>{`${item.chunk_count || 0} 切片 | ${item.processed_at || ""}`}</div>
-                <button onClick={() => onDeleteNote(item)}>🗑️ 删除笔记</button>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="card">
-        <h3>🎯 元数据过滤</h3>
-        <input placeholder="book_id" value={filterBookId} onChange={(e) => setFilterBookId(e.target.value)} />
-        <input placeholder="书名(title)" value={filterTitle} onChange={(e) => setFilterTitle(e.target.value)} />
-        <input placeholder="作者(author)" value={filterAuthor} onChange={(e) => setFilterAuthor(e.target.value)} />
-        <select value={filterDomain} onChange={(e) => setFilterDomain(e.target.value)}>
-          <option value="">全部领域</option>
-          {(config?.valid_domains || []).map((domain) => (
-            <option key={domain} value={domain}>
-              {domain}
-            </option>
-          ))}
-        </select>
-
-        <label className="checkbox-line">
-          <input
-            type="checkbox"
-            checked={enablePageRange}
-            onChange={(e) => setEnablePageRange(e.target.checked)}
-          />
-          启用页码范围过滤
-        </label>
-        <div className="range-row">
-          <input
-            type="number"
-            min="1"
-            value={minPage}
-            disabled={!enablePageRange}
-            onChange={(e) => setMinPage(Number(e.target.value))}
-          />
-          <span>到</span>
-          <input
-            type="number"
-            min="1"
-            value={maxPage}
-            disabled={!enablePageRange}
-            onChange={(e) => setMaxPage(Number(e.target.value))}
-          />
-        </div>
-      </section>
-
-      <section className="card">
-        <h3>⚙️ 检索参数</h3>
-        <label className="checkbox-line">
-          <input
-            type="checkbox"
-            checked={useReranker}
-            onChange={(e) => setUseReranker(e.target.checked)}
-          />
-          启用重排序 (Reranker)
-        </label>
-        <label>
-          向量召回数量 <span>{recallTopK}</span>
-        </label>
-        <input
-          type="range"
-          min="3"
-          max="30"
-          value={recallTopK}
-          onChange={(e) => setRecallTopK(Number(e.target.value))}
-        />
-        <label>
-          最终返回文档数 <span>{rerankTopK}</span>
-        </label>
-        <input
-          type="range"
-          min="1"
-          max="10"
-          value={rerankTopK}
-          onChange={(e) => setRerankTopK(Number(e.target.value))}
-        />
-      </section>
-
-      <button className="danger" onClick={onClearHistory}>
-        🗑️ 清除对话历史
-      </button>
-    </aside>
+      </details>
+    </div>
   );
 }

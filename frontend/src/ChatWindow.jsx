@@ -1,16 +1,5 @@
 import MarkdownRenderer from "./MarkdownRenderer";
 
-function getSourceLocation(src) {
-  const idx = Number(src.chunk_index || 0) + 1;
-  if (src.page_num) {
-    return `页码 ${src.page_num} | 片段 ${idx}`;
-  }
-  if (src.chapter_title) {
-    return `章节 ${src.chapter_title} | 片段 ${idx}`;
-  }
-  return `片段 ${idx}`;
-}
-
 export default function ChatWindow({
   chatBoxRef,
   messages,
@@ -21,7 +10,12 @@ export default function ChatWindow({
   onAsk,
 }) {
   return (
-    <>
+    <div className="chat-window">
+      <div className="panel-title-row">
+        <h2>对话交互</h2>
+        <span className="muted-text">支持多轮上下文</span>
+      </div>
+
       <section ref={chatBoxRef} className="chat-box">
         {messages.map((msg, idx) => (
           <div key={`${msg.role}_${idx}`} className={`msg ${msg.role}`}>
@@ -37,30 +31,12 @@ export default function ChatWindow({
                   </button>
                 </div>
                 <MarkdownRenderer content={msg.content} />
+                {(msg.sources || []).length > 0 && (
+                  <div className="msg-citations">{`引用来源 ${msg.sources.length} 条（右侧查看）`}</div>
+                )}
               </>
             ) : (
               <div className="plain-content">{msg.content}</div>
-            )}
-            {msg.role === "assistant" && (msg.sources || []).length > 0 && (
-              <div className="sources">
-                <strong>📖 参考来源</strong>
-                {(msg.sources || []).map((src, sidx) => (
-                  <div className="source-item" key={`${idx}_${sidx}`}>
-                    <div>
-                      <strong>{src.title || src.file_name || "未知书籍"}</strong>
-                    </div>
-                    <div>
-                      {`book_id=${src.book_id || ""} | author=${src.author || "未知作者"} | domain=${src.domain || ""}`}
-                    </div>
-                    <div>
-                      {`来源类型=${src.source_type || "book_content"}${src.note_id ? ` | note_id=${src.note_id}` : ""}${src.note_title ? ` | 笔记标题=${src.note_title}` : ""}`}
-                    </div>
-                    <div>{getSourceLocation(src)}</div>
-                    <div>{`文件: ${src.file_name || "未知文件"}`}</div>
-                    <div>{src.preview || ""}</div>
-                  </div>
-                ))}
-              </div>
             )}
           </div>
         ))}
@@ -77,6 +53,6 @@ export default function ChatWindow({
           发送
         </button>
       </form>
-    </>
+    </div>
   );
 }

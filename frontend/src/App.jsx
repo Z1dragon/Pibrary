@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ChatWindow from "./ChatWindow";
 import Sidebar from "./Sidebar";
+import SourcePanel from "./SourcePanel";
 
 async function request(url, options = {}) {
   const res = await fetch(url, options);
@@ -75,6 +76,8 @@ export default function App() {
   const [recallTopK, setRecallTopK] = useState(10);
   const [rerankTopK, setRerankTopK] = useState(3);
   const [copiedMsgKey, setCopiedMsgKey] = useState("");
+  const [leftExpanded, setLeftExpanded] = useState(false);
+  const [rightExpanded, setRightExpanded] = useState(false);
 
   const buildLogRef = useRef(null);
   const noteLogRef = useRef(null);
@@ -107,6 +110,31 @@ export default function App() {
   }
 
   const books = useMemo(() => manifestItems || [], [manifestItems]);
+  const activeSources = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const current = messages[index];
+      if (current.role === "assistant" && Array.isArray(current.sources) && current.sources.length > 0) {
+        return current.sources;
+      }
+    }
+    return [];
+  }, [messages]);
+
+  function toggleLeftPanel() {
+    setLeftExpanded((prev) => {
+      const next = !prev;
+      if (next) setRightExpanded(false);
+      return next;
+    });
+  }
+
+  function toggleRightPanel() {
+    setRightExpanded((prev) => {
+      const next = !prev;
+      if (next) setLeftExpanded(false);
+      return next;
+    });
+  }
 
   function appendBuildLog(text) {
     setBuildLogs((prev) => [...prev, nowPrefix(text)]);
@@ -383,6 +411,29 @@ export default function App() {
     saveSessionId(sessionId);
   }, [sessionId]);
 
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === "Escape") {
+        setLeftExpanded(false);
+        setRightExpanded(false);
+        return;
+      }
+      if (event.key === "[") {
+        event.preventDefault();
+        toggleLeftPanel();
+      }
+      if (event.key === "]") {
+        event.preventDefault();
+        toggleRightPanel();
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   async function onClearHistory() {
     const currentSessionId = (sessionId || "").trim();
     if (currentSessionId) {
@@ -399,75 +450,120 @@ export default function App() {
   }
 
   return (
-    <div className="layout">
-      <Sidebar
-        config={config}
-        files={files}
-        metadataMap={metadataMap}
-        forceRebuild={forceRebuild}
-        buildSubmitting={buildSubmitting}
-        noteSubmitting={noteSubmitting}
-        buildLogs={buildLogs}
-        noteLogs={noteLogs}
-        noteBookId={noteBookId}
-        noteTitle={noteTitle}
-        noteText={noteText}
-        filterBookId={filterBookId}
-        filterTitle={filterTitle}
-        filterAuthor={filterAuthor}
-        filterDomain={filterDomain}
-        enablePageRange={enablePageRange}
-        minPage={minPage}
-        maxPage={maxPage}
-        useReranker={useReranker}
-        recallTopK={recallTopK}
-        rerankTopK={rerankTopK}
-        manifestItems={manifestItems}
-        noteItems={noteItems}
-        books={books}
-        buildLogRef={buildLogRef}
-        noteLogRef={noteLogRef}
-        setFiles={setFiles}
-        setMetadataMap={setMetadataMap}
-        setBuildLogs={setBuildLogs}
-        parseMetadataForFiles={parseMetadataForFiles}
-        setForceRebuild={setForceRebuild}
-        updateMetaField={updateMetaField}
-        onBuild={onBuild}
-        setNoteBookId={setNoteBookId}
-        setNoteTitle={setNoteTitle}
-        setNoteText={setNoteText}
-        onUploadNote={onUploadNote}
-        onDeleteFile={onDeleteFile}
-        onDeleteNote={onDeleteNote}
-        setFilterBookId={setFilterBookId}
-        setFilterTitle={setFilterTitle}
-        setFilterAuthor={setFilterAuthor}
-        setFilterDomain={setFilterDomain}
-        setEnablePageRange={setEnablePageRange}
-        setMinPage={setMinPage}
-        setMaxPage={setMaxPage}
-        setUseReranker={setUseReranker}
-        setRecallTopK={setRecallTopK}
-        setRerankTopK={setRerankTopK}
-        onClearHistory={onClearHistory}
-      />
+    <div className="app-shell">
+      <header className="top-nav">
+        <div className="brand-area">
+          <h1>LibraryOS</h1>
+          <p>AI 知识检索工作台</p>
+        </div>
+        <div className="nav-actions">
+          <span className="session-chip">{sessionId ? `会话: ${sessionId}` : "新会话"}</span>
+          <button type="button" className="btn-dark" onClick={onClearHistory}>
+            清空对话
+          </button>
+        </div>
+      </header>
 
-      <main className="main">
-        <header className="header">
-          <h1>📚 中文 RAG 知识库问答系统</h1>
-          <p>基于 LangChain + Milvus + GLM | 支持 PDF / Markdown / TXT / EPUB / MOBI</p>
-        </header>
-        <ChatWindow
-          chatBoxRef={chatBoxRef}
-          messages={messages}
-          copiedMsgKey={copiedMsgKey}
-          copyMarkdownRaw={copyMarkdownRaw}
-          questionInput={questionInput}
-          setQuestionInput={setQuestionInput}
-          onAsk={onAsk}
-        />
-      </main>
+      <div
+        className={`workspace-grid ${leftExpanded ? "left-open" : "left-closed"} ${rightExpanded ? "right-open" : "right-closed"}`}
+      >
+        <aside className={`panel side-panel panel-left ${leftExpanded ? "expanded" : "collapsed"}`}>
+          <button
+            type="button"
+            className="side-tab"
+            onClick={toggleLeftPanel}
+            aria-expanded={leftExpanded}
+            aria-label="切换知识库面板"
+          >
+            <span className="side-tab-icon" aria-hidden="true" />
+            <span className="side-tab-text">知识库</span>
+            <span className="side-tab-count">{manifestItems.length + noteItems.length}</span>
+          </button>
+          <div className="side-drawer-content">
+            <Sidebar
+              config={config}
+              files={files}
+              metadataMap={metadataMap}
+              forceRebuild={forceRebuild}
+              buildSubmitting={buildSubmitting}
+              noteSubmitting={noteSubmitting}
+              buildLogs={buildLogs}
+              noteLogs={noteLogs}
+              noteBookId={noteBookId}
+              noteTitle={noteTitle}
+              noteText={noteText}
+              filterBookId={filterBookId}
+              filterTitle={filterTitle}
+              filterAuthor={filterAuthor}
+              filterDomain={filterDomain}
+              enablePageRange={enablePageRange}
+              minPage={minPage}
+              maxPage={maxPage}
+              useReranker={useReranker}
+              recallTopK={recallTopK}
+              rerankTopK={rerankTopK}
+              manifestItems={manifestItems}
+              noteItems={noteItems}
+              books={books}
+              buildLogRef={buildLogRef}
+              noteLogRef={noteLogRef}
+              setFiles={setFiles}
+              setMetadataMap={setMetadataMap}
+              setBuildLogs={setBuildLogs}
+              parseMetadataForFiles={parseMetadataForFiles}
+              setForceRebuild={setForceRebuild}
+              updateMetaField={updateMetaField}
+              onBuild={onBuild}
+              setNoteBookId={setNoteBookId}
+              setNoteTitle={setNoteTitle}
+              setNoteText={setNoteText}
+              onUploadNote={onUploadNote}
+              onDeleteFile={onDeleteFile}
+              onDeleteNote={onDeleteNote}
+              setFilterBookId={setFilterBookId}
+              setFilterTitle={setFilterTitle}
+              setFilterAuthor={setFilterAuthor}
+              setFilterDomain={setFilterDomain}
+              setEnablePageRange={setEnablePageRange}
+              setMinPage={setMinPage}
+              setMaxPage={setMaxPage}
+              setUseReranker={setUseReranker}
+              setRecallTopK={setRecallTopK}
+              setRerankTopK={setRerankTopK}
+              onClearHistory={onClearHistory}
+            />
+          </div>
+        </aside>
+
+        <main className="panel panel-center chat-dominant">
+          <ChatWindow
+            chatBoxRef={chatBoxRef}
+            messages={messages}
+            copiedMsgKey={copiedMsgKey}
+            copyMarkdownRaw={copyMarkdownRaw}
+            questionInput={questionInput}
+            setQuestionInput={setQuestionInput}
+            onAsk={onAsk}
+          />
+        </main>
+
+        <aside className={`panel side-panel panel-right ${rightExpanded ? "expanded" : "collapsed"}`}>
+          <button
+            type="button"
+            className="side-tab"
+            onClick={toggleRightPanel}
+            aria-expanded={rightExpanded}
+            aria-label="切换来源面板"
+          >
+            <span className="side-tab-icon" aria-hidden="true" />
+            <span className="side-tab-text">来源</span>
+            <span className="side-tab-count">{activeSources.length}</span>
+          </button>
+          <div className="side-drawer-content">
+            <SourcePanel sources={activeSources} />
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
